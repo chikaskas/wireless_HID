@@ -38,7 +38,6 @@
       overflow: hidden;
     }
 
-    /* Top Navigation Bar */
     header {
       background: var(--surface);
       border-bottom: 1px solid var(--surface-border);
@@ -83,7 +82,6 @@
       gap: 8px;
     }
 
-    /* Mode Switcher Tabs */
     .mode-switch {
       display: flex;
       background: var(--bg);
@@ -130,7 +128,6 @@
       background: var(--accent-hover);
     }
 
-    /* Main Content Area */
     main {
       flex: 1;
       display: flex;
@@ -138,9 +135,7 @@
       position: relative;
     }
 
-    /* ==========================================================================
-       LAPTOP MODE
-       ========================================================================== */
+    /* LAPTOP MODE */
     #laptopView {
       display: none;
       width: 100%;
@@ -188,7 +183,6 @@
       align-items: center;
     }
 
-    /* Keyboard Passthrough Zone */
     #kbdCaptureZone {
       background: var(--bg);
       border: 2px dashed var(--surface-border);
@@ -221,7 +215,6 @@
       text-align: center;
     }
 
-    /* Pointer Lock Mouse Capture Zone */
     #mouseCaptureZone {
       flex: 1;
       background: var(--bg);
@@ -241,7 +234,6 @@
       background: rgba(139, 92, 246, 0.05);
     }
 
-    /* Laptop Command Bar */
     .command-bar {
       display: flex;
       gap: 8px;
@@ -265,7 +257,6 @@
       border-color: var(--accent);
     }
 
-    /* Macro Grid */
     .macro-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
@@ -290,9 +281,7 @@
       border-color: var(--accent);
     }
 
-    /* ==========================================================================
-       MOBILE MODE
-       ========================================================================== */
+    /* MOBILE MODE */
     #mobileView {
       display: none;
       width: 100%;
@@ -405,7 +394,6 @@
 </head>
 <body class="mobile-mode">
 
-  <!-- Header -->
   <header>
     <div class="brand">
       <div class="status-badge">
@@ -414,7 +402,6 @@
       </div>
     </div>
 
-    <!-- Mode Selector: Laptop vs Mobile -->
     <div class="mode-switch">
       <button class="mode-tab active" id="tabMobile">📱 Mobile</button>
       <button class="mode-tab" id="tabLaptop">💻 Laptop</button>
@@ -432,13 +419,13 @@
         <!-- Physical Keyboard Passthrough Zone -->
         <div class="panel">
           <div class="panel-title">
-            <span>Physical Keyboard Passthrough</span>
+            <span>Hardware Keyboard Passthrough</span>
             <span id="kbdStatusText" style="color:var(--text-muted); font-size:11px;">Click box to enable</span>
           </div>
           <div id="kbdCaptureZone" tabindex="0">
             <span class="indicator">⌨️ Click here to type with your Laptop's Real Keyboard</span>
             <span class="subtext">
-              Directly passes keystrokes, shortcuts (Ctrl+C, Ctrl+Alt+T, Tab, Nano/Vim commands) to the Pi 5.
+              Full hardware mapping: Option (Alt), Ctrl+Shift++, Ctrl+-, F1-F12, Vim/Nano, arrow keys work 100% natively.
             </span>
           </div>
         </div>
@@ -519,7 +506,7 @@
 
         <div class="key-row">
           <button class="vkey special" id="mobModCtrl" data-mod="ctrl">Ctrl</button>
-          <button class="vkey special" id="mobModAlt" data-mod="alt">Alt</button>
+          <button class="vkey special" id="mobModAlt" data-mod="alt">Opt/Alt</button>
           <button class="vkey special" id="mobModShift" data-mod="shift">Shift</button>
           <button class="vkey special" id="mobModGui" data-mod="gui">Super</button>
           <button class="vkey special" data-action="tab">Tab</button>
@@ -542,7 +529,7 @@
     // Web BLE Communication Engine
     // ==========================================================================
     const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
-    const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
+    const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 
     let bleDevice = null;
     let rxChar = null;
@@ -561,8 +548,6 @@
       }
       try {
         statusText.textContent = "Scanning...";
-        // acceptAllDevices: true ensures Brave/Chrome lists all nearby devices
-        // without filter mismatch issues
         bleDevice = await navigator.bluetooth.requestDevice({
           acceptAllDevices: true,
           optionalServices: [NUS_SERVICE_UUID]
@@ -616,6 +601,17 @@
       }
     }
 
+    // Paced String Typing (Prevents BLE MTU and UART FIFO overflow)
+    async function sendTextSafely(str) {
+      if (!str) return;
+      const CHUNK_SIZE = 12; // 12 bytes comfortably fits inside default 20-byte BLE MTU
+      for (let i = 0; i < str.length; i += CHUNK_SIZE) {
+        const slice = str.slice(i, i + CHUNK_SIZE);
+        send(`T:${slice}`);
+        await new Promise(res => setTimeout(res, 25));
+      }
+    }
+
     // View Switcher
     const tabMobile = document.getElementById('tabMobile');
     const tabLaptop = document.getElementById('tabLaptop');
@@ -644,14 +640,69 @@
     }
 
     // ==========================================================================
-    // LAPTOP MODE: Physical Keyboard Passthrough (With Full Modifier Support)
+    // HARDWARE KEYBOARD TO USB HID CODES
+    // Maps physical e.code directly to Standard USB HID Keycodes
     // ==========================================================================
+    const CODE_TO_HID = {
+      // Letters A-Z
+      'KeyA': 4, 'KeyB': 5, 'KeyC': 6, 'KeyD': 7, 'KeyE': 8, 'KeyF': 9, 'KeyG': 10,
+      'KeyH': 11, 'KeyI': 12, 'KeyJ': 13, 'KeyK': 14, 'KeyL': 15, 'KeyM': 16, 'KeyN': 17,
+      'KeyO': 18, 'KeyP': 19, 'KeyQ': 20, 'KeyR': 21, 'KeyS': 22, 'KeyT': 23, 'KeyU': 24,
+      'KeyV': 25, 'KeyW': 26, 'KeyX': 27, 'KeyY': 28, 'KeyZ': 29,
+
+      // Digits (Top Row)
+      'Digit1': 30, 'Digit2': 31, 'Digit3': 32, 'Digit4': 33, 'Digit5': 34,
+      'Digit6': 35, 'Digit7': 36, 'Digit8': 37, 'Digit9': 38, 'Digit0': 39,
+
+      // Primary Controls
+      'Enter': 40, 'Escape': 41, 'Backspace': 42, 'Tab': 43, 'Space': 44,
+
+      // Symbols (Crucial for Ctrl++, Ctrl+-, Ctrl+Shift++, etc.)
+      'Minus': 45,          // - and _
+      'Equal': 46,          // = and + (Ctrl + Shift + + or Ctrl + +)
+      'BracketLeft': 47,    // [ and {
+      'BracketRight': 48,   // ] and }
+      'Backslash': 49,      // \ and |
+      'Semicolon': 51,      // ; and :
+      'Quote': 52,          // ' and "
+      'Backquote': 53,      // ` and ~
+      'Comma': 54,          // , and <
+      'Period': 55,         // . and >
+      'Slash': 56,          // / and ?
+      'CapsLock': 57,
+
+      // Function Keys
+      'F1': 58, 'F2': 59, 'F3': 60, 'F4': 61, 'F5': 62, 'F6': 63,
+      'F7': 64, 'F8': 65, 'F9': 66, 'F10': 67, 'F11': 68, 'F12': 69,
+
+      // Navigation & Editing
+      'PrintScreen': 70, 'ScrollLock': 71, 'Pause': 72,
+      'Insert': 73, 'Home': 74, 'PageUp': 75, 'Delete': 76, 'End': 77, 'PageDown': 78,
+      'ArrowRight': 79, 'ArrowLeft': 80, 'ArrowDown': 81, 'ArrowUp': 82,
+
+      // Keypad
+      'NumpadDivide': 84, 'NumpadMultiply': 85, 'NumpadSubtract': 86, 'NumpadAdd': 87,
+      'NumpadEnter': 88, 'Numpad1': 89, 'Numpad2': 90, 'Numpad3': 91, 'Numpad4': 92,
+      'Numpad5': 93, 'Numpad6': 94, 'Numpad7': 95, 'Numpad8': 96, 'Numpad9': 97,
+      'Numpad0': 98, 'NumpadDecimal': 99,
+
+      // Modifiers (Option = Alt on Mac!)
+      'ControlLeft': 224,
+      'ShiftLeft': 225,
+      'AltLeft': 226,       // Mac Option / Alt Left!
+      'MetaLeft': 227,      // Mac Cmd / Windows Super Left
+      'ControlRight': 228,
+      'ShiftRight': 229,
+      'AltRight': 230,      // Mac Option / Alt Right!
+      'MetaRight': 231      // Mac Cmd / Windows Super Right
+    };
+
     const kbdCaptureZone = document.getElementById('kbdCaptureZone');
     const kbdStatusText = document.getElementById('kbdStatusText');
 
     kbdCaptureZone.addEventListener('focus', () => {
       kbdCaptureZone.classList.add('capturing');
-      kbdStatusText.textContent = "Active - Keys will send to Pi";
+      kbdStatusText.textContent = "Active - Keys streaming to Pi";
       kbdStatusText.style.color = "var(--success)";
     });
 
@@ -662,43 +713,19 @@
       send('R:ALL');
     });
 
-    const KEY_NAME_MAP = {
-      'Control': 'CTRL',
-      'Alt': 'ALT',
-      'Shift': 'SHIFT',
-      'Meta': 'GUI',
-      'Enter': 'ENTER',
-      'Tab': 'TAB',
-      'Escape': 'ESC',
-      'Backspace': 'BACKSPACE',
-      ' ': 'SPACE',
-      'ArrowUp': 'UP',
-      'ArrowDown': 'DOWN',
-      'ArrowLeft': 'LEFT',
-      'ArrowRight': 'RIGHT'
-    };
-
     kbdCaptureZone.addEventListener('keydown', (e) => {
       e.preventDefault();
-      const mapped = KEY_NAME_MAP[e.key];
-      if (mapped) {
-        send(`K:D:${mapped}`);
-      } else if (e.ctrlKey || e.altKey) {
-        // Modifier combination (e.g. Ctrl+C, Ctrl+Z, Ctrl+D)
-        send(`K:D:${e.key.toUpperCase()}`);
-      } else if (e.key.length === 1) {
-        // Plain typed character
-        send(`T:${e.key}`);
+      const hidCode = CODE_TO_HID[e.code];
+      if (hidCode !== undefined) {
+        send(`K:D:${hidCode}`);
       }
     });
 
     kbdCaptureZone.addEventListener('keyup', (e) => {
       e.preventDefault();
-      const mapped = KEY_NAME_MAP[e.key];
-      if (mapped) {
-        send(`K:U:${mapped}`);
-      } else if (e.ctrlKey || e.altKey) {
-        send(`K:U:${e.key.toUpperCase()}`);
+      const hidCode = CODE_TO_HID[e.code];
+      if (hidCode !== undefined) {
+        send(`K:U:${hidCode}`);
       }
     });
 
@@ -815,23 +842,23 @@
     rightBtn.addEventListener('pointerdown', () => send('M:2:0:0:0'));
     rightBtn.addEventListener('pointerup', () => send('M:0:0:0:0'));
 
-    // Command Bars
+    // Command Bars with Paced Safe Text Streaming
     function setupCmdInput(inputEl, sendBtn, enterBtn) {
-      sendBtn.addEventListener('click', () => {
+      sendBtn.addEventListener('click', async () => {
         const text = inputEl.value;
         if (text) {
-          send(`T:${text}`);
+          await sendTextSafely(text);
           inputEl.value = '';
         }
       });
       enterBtn.addEventListener('click', () => {
         send('K:P:ENTER');
       });
-      inputEl.addEventListener('keydown', (e) => {
+      inputEl.addEventListener('keydown', async (e) => {
         if (e.key === 'Enter') {
           const text = inputEl.value;
           if (text) {
-            send(`T:${text}`);
+            await sendTextSafely(text);
             send('K:P:ENTER');
             inputEl.value = '';
           } else {
@@ -855,25 +882,25 @@
 
     function executeMacro(name) {
       if (name === 'ctrl-c') {
-        send('K:D:CTRL'); send('K:P:C'); send('K:U:CTRL');
+        send('K:D:224'); send('K:P:6'); send('K:U:224');
       } else if (name === 'ctrl-alt-t') {
-        send('K:D:CTRL'); send('K:D:ALT'); send('K:P:T'); send('K:U:ALT'); send('K:U:CTRL');
+        send('K:D:224'); send('K:D:226'); send('K:P:23'); send('K:U:226'); send('K:U:224');
       } else if (name === 'ctrl-z') {
-        send('K:D:CTRL'); send('K:P:Z'); send('K:U:CTRL');
+        send('K:D:224'); send('K:P:29'); send('K:U:224');
       } else if (name === 'ctrl-d') {
-        send('K:D:CTRL'); send('K:P:D'); send('K:U:CTRL');
+        send('K:D:224'); send('K:P:7'); send('K:U:224');
       } else if (name === 'ctrl-l') {
-        send('K:D:CTRL'); send('K:P:L'); send('K:U:CTRL');
+        send('K:D:224'); send('K:P:15'); send('K:U:224');
       } else if (name === 'esc') {
-        send('K:P:ESC');
+        send('K:P:41');
       } else if (name === 'tab') {
-        send('K:P:TAB');
+        send('K:P:43');
       } else if (name === 'up') {
-        send('K:P:UP');
+        send('K:P:82');
       } else if (name === 'down') {
-        send('K:P:DOWN');
+        send('K:P:81');
       } else if (name === 'enter') {
-        send('K:P:ENTER');
+        send('K:P:40');
       }
     }
 
@@ -881,19 +908,24 @@
       btn.addEventListener('click', () => executeMacro(btn.dataset.macro));
     });
 
+    // Mobile Virtual Modifiers
     const modifiers = { ctrl: false, alt: false, shift: false, gui: false };
+    const MOD_HID_MAP = { ctrl: 224, shift: 225, alt: 226, gui: 227 };
+
     document.querySelectorAll('[data-mod]').forEach(btn => {
       btn.addEventListener('click', () => {
         const mod = btn.dataset.mod;
         modifiers[mod] = !modifiers[mod];
         btn.classList.toggle('active', modifiers[mod]);
-        send(`K:${modifiers[mod] ? 'D' : 'U'}:${mod.toUpperCase()}`);
+        send(`K:${modifiers[mod] ? 'D' : 'U'}:${MOD_HID_MAP[mod]}`);
       });
     });
 
     document.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', () => {
-        send(`K:P:${btn.dataset.action.toUpperCase()}`);
+        const act = btn.dataset.action;
+        const map = { 'tab': 43, 'esc': 41, 'backspace': 42, 'up': 82, 'down': 81, 'left': 80, 'right': 79 };
+        if (map[act]) send(`K:P:${map[act]}`);
       });
     });
   </script>
