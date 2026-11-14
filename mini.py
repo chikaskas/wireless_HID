@@ -1,16 +1,5 @@
 # ==============================================================================
-# ESP32-C3 Super Mini - MicroPython BLE to UART Bridge
-# ==============================================================================
-# Description:
-#   Acts as a BLE Peripheral providing the standard Nordic UART Service (NUS).
-#   Receives HID command packets from the Web BLE client and forwards them
-#   via hardware UART to the RP2040 (Orpheus Pico).
-#
-# Hardware Connections:
-#   ESP32-C3 GPIO4 (TX) -> RP2040 GP1 (RX)
-#   ESP32-C3 GPIO5 (RX) -> RP2040 GP0 (TX) [Optional]
-#   ESP32-C3 GND        -> RP2040 GND
-#   ESP32-C3 5V/VCC     -> RP2040 VBUS (5V from Pi USB)
+# ESP32-C3 Super Mini - MicroPython BLE to UART Bridge (Robust & Verified)
 # ==============================================================================
 
 import bluetooth
@@ -39,37 +28,42 @@ _UART_SERVICE = (
     ),
 )
 
-def advertising_payload(name=None, services=None):
-    """Builds standard BLE advertisement payload."""
+def build_adv_payload(short_name="Pi5"):
+    """
+    Primary advertisement payload:
+      - Flags (3 bytes)
+      - Short Name 'Pi5' (5 bytes)
+      - 128-bit NUS UUID (18 bytes)
+      Total = 26 bytes (strictly within the 31-byte limit!)
+    """
     payload = bytearray()
+    # Flags: 0x06 (General Discoverable + BR/EDR not supported)
+    payload += bytes([2, 0x01, 0x06])
+    # Shortened Local Name (0x08)
+    sname_b = short_name.encode()
+    payload += bytes([len(sname_b) + 1, 0x08]) + sname_b
+    # Complete 128-bit Service UUID (0x07)
+    uuid_b = bytes(_NUS_UUID)
+    payload += bytes([len(uuid_b) + 1, 0x07]) + uuid_b
+    return payload
 
-    def _append(adv_type, value):
-        nonlocal payload
-        payload += bytes([len(value) + 1, adv_type]) + value
-
-    # General Discoverable Mode & BR/EDR not supported
-    _append(0x01, bytes([0x06]))
-
-    if name:
-        _append(0x09, name.encode())
-
-    if services:
-        for uuid in services:
-            b = bytes(uuid)
-            if len(b) == 2:
-                _append(0x03, b)
-            elif len(b) == 16:
-                _append(0x07, b)
-
+def build_resp_payload(full_name="Pi5-Remote"):
+    """
+    Scan response payload:
+      - Complete Local Name 'Pi5-Remote' (12 bytes <= 31)
+    """
+    payload = bytearray()
+    name_b = full_name.encode()
+    payload += bytes([len(name_b) + 1, 0x09]) + name_b
     return payload
 
 class BLEUARTBridge:
     def __init__(self, name="Pi5-Remote"):
-        # Hardware UART configuration for ESP32-C3
+        # Hardware UART configuration for ESP32-C3 Super Mini
         # TX=GPIO4, RX=GPIO5 at 115200 baud
-        self.uart = UART(1, baudrate=115200, tx=Pin(4), rx=Pin(5))
+        self.uart = UART(1, baudrate=115200, tx=4, rx=5, txbuf=256, rxbuf=256)
 
-        # Onboard LED on ESP32-C3 Super Mini (GPIO8, active low)
+        # Onboard Blue LED on ESP32-C3 Super Mini (GPIO8, active LOW: 0=ON, 1=OFF)
         try:
             self.led = Pin(8, Pin.OUT)
             self.led.value(1) # Off initially
@@ -77,6 +71,8 @@ class BLEUARTBridge:
             self.led = None
 
         self.ble = bluetooth.BLE()
+        self.ble.active(False)
+        time.sleep_ms(150)
         self.ble.active(True)
         self.ble.irq(self._irq)
 
@@ -84,42 +80,50 @@ class BLEUARTBridge:
         ((self.handle_tx, self.handle_rx),) = self.ble.gatts_register_services((_UART_SERVICE,))
         
         self.connections = set()
-        self.payload = advertising_payload(name=name, services=[_NUS_UUID])
+        self.adv_data = build_adv_payload("Pi5")
+        self.resp_data = build_resp_payload(name)
         self.advertise()
-        print(f"[BLE-UART] Ready. Device name: {name}")
+        print(f"[BLE-UART] Initialized successfully.")
+        print(f"[BLE-UART] Broadcasting as: {name} (Short: Pi5)")
 
     def _irq(self, event, data):
         if event == _IRQ_CENTRAL_CONNECT:
             conn_handle, _, _ = data
             self.connections.add(conn_handle)
-            print(f"[BLE] Central connected (Handle: {conn_handle})")
+            print(f"[BLE] Connected! (Connection ID: {conn_handle})")
             if self.led:
-                self.led.value(0) # Turn LED ON when connected
+                self.led.value(0) # Solid ON when connected
 
         elif event == _IRQ_CENTRAL_DISCONNECT:
             conn_handle, _, _ = data
             if conn_handle in self.connections:
                 self.connections.remove(conn_handle)
-            print(f"[BLE] Central disconnected (Handle: {conn_handle})")
+            print(f"[BLE] Disconnected. Re-starting advertisement...")
             if self.led:
-                self.led.value(1) # Turn LED OFF when disconnected
+                self.led.value(1) # Off
             self.advertise()
 
         elif event == _IRQ_GATTS_WRITE:
             conn_handle, value_handle = data
             if value_handle == self.handle_rx:
-                # Read incoming data from Web BLE
                 data_in = self.ble.gatts_read(self.handle_rx)
                 if data_in:
-                    # Instantly forward bytes directly over hardware UART to the Pico
+                    # Immediately forward bytes to Pico over UART
                     self.uart.write(data_in)
 
-    def advertise(self, interval_us=50000):
-        print("[BLE] Advertising started...")
-        self.ble.gap_advertise(interval_us, adv_data=self.payload)
+    def advertise(self, interval_us=100000):
+        # 100ms interval for fast discovery
+        self.ble.gap_advertise(interval_us, adv_data=self.adv_data, resp_data=self.resp_data)
 
-# Entry point
+# Main execution loop with visual heartbeat
 if __name__ == "__main__":
     bridge = BLEUARTBridge(name="Pi5-Remote")
+    led_state = 1
     while True:
-        time.sleep(1)
+        # If not connected, blink LED every 500ms as a visual heartbeat
+        if not bridge.connections and bridge.led:
+            led_state = 0 if led_state == 1 else 1
+            bridge.led.value(led_state)
+            time.sleep_ms(500)
+        else:
+            time.sleep(1)

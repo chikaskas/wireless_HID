@@ -573,8 +573,10 @@
       }
       try {
         statusText.textContent = "Scanning...";
+        // acceptAllDevices: true ensures Brave/Chrome lists all nearby devices
+        // without filter mismatch issues
         bleDevice = await navigator.bluetooth.requestDevice({
-          filters: [{ namePrefix: 'Pi5' }, { services: [NUS_SERVICE_UUID] }],
+          acceptAllDevices: true,
           optionalServices: [NUS_SERVICE_UUID]
         });
 
