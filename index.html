@@ -139,7 +139,7 @@
     }
 
     /* ==========================================================================
-       LAPTOP MODE (Side-by-side desktop view + real keyboard/mouse passthrough)
+       LAPTOP MODE
        ========================================================================== */
     #laptopView {
       display: none;
@@ -291,7 +291,7 @@
     }
 
     /* ==========================================================================
-       MOBILE MODE (Handheld touch controller, thumb-friendly virtual keys)
+       MOBILE MODE
        ========================================================================== */
     #mobileView {
       display: none;
@@ -426,13 +426,8 @@
   </header>
 
   <main>
-    <!-- ====================================================================
-         1. LAPTOP FIRST VIEW
-         Designed for when you're on a Laptop/Desktop controlling the Pi
-         Features: Physical Keyboard Capture, Pointer Lock Mouse, Macros
-         ==================================================================== -->
+    <!-- 1. LAPTOP VIEW -->
     <div id="laptopView">
-      <!-- Left Column: Keyboard & Terminal commands -->
       <div class="laptop-col laptop-left">
         <!-- Physical Keyboard Passthrough Zone -->
         <div class="panel">
@@ -476,7 +471,6 @@
         </div>
       </div>
 
-      <!-- Right Column: Pointer-Lock Desktop Mouse Capture -->
       <div class="laptop-col laptop-right">
         <div class="panel" style="height:100%;">
           <div class="panel-title">
@@ -494,12 +488,8 @@
       </div>
     </div>
 
-    <!-- ====================================================================
-         2. MOBILE FIRST VIEW
-         Designed for phones: Large touch trackpad, virtual buttons & thumb nav
-         ==================================================================== -->
+    <!-- 2. MOBILE VIEW -->
     <div id="mobileView">
-      <!-- Touchpad & Scrollbar -->
       <div class="mobile-touch-row">
         <div id="mobileTrackpad">
           <span>Touchpad (Drag, Tap=Click)</span>
@@ -507,20 +497,17 @@
         <div id="mobileScrollbar">Scroll</div>
       </div>
 
-      <!-- Left & Right Click Bars -->
       <div class="mobile-mouse-clicks">
         <button class="btn-mouse" id="mobileLeftClick">Left Click</button>
         <button class="btn-mouse" id="mobileRightClick">Right Click</button>
       </div>
 
-      <!-- Quick Command Input -->
       <div class="command-bar">
         <input type="text" id="mobileCmdInput" class="terminal-input" placeholder="Quick command (e.g., kali)...">
         <button class="btn-primary" id="mobileSendBtn">Send</button>
         <button class="btn-primary" id="mobileEnterBtn" style="background:var(--success);">↵</button>
       </div>
 
-      <!-- Virtual Keyboard Grid -->
       <div class="keypad">
         <div class="key-row">
           <button class="vkey kali" data-macro="ctrl-c">Ctrl+C</button>
@@ -567,6 +554,7 @@
 
     connectBtn.addEventListener('click', async () => {
       if (isConnected) {
+        send('R:ALL');
         if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
         onDisconnected();
         return;
@@ -604,7 +592,6 @@
       connectBtn.textContent = "Connect BLE";
     }
 
-    // Packet queue for smooth non-blocking BLE transmissions
     let sendQueue = [];
     let isSending = false;
 
@@ -629,9 +616,7 @@
       }
     }
 
-    // ==========================================================================
-    // View Switcher (Auto-detect + Manual Tabs)
-    // ==========================================================================
+    // View Switcher
     const tabMobile = document.getElementById('tabMobile');
     const tabLaptop = document.getElementById('tabLaptop');
 
@@ -652,7 +637,6 @@
     tabMobile.addEventListener('click', () => setView('mobile'));
     tabLaptop.addEventListener('click', () => setView('laptop'));
 
-    // Auto-detect screen size on load
     if (window.innerWidth >= 768) {
       setView('laptop');
     } else {
@@ -660,7 +644,7 @@
     }
 
     // ==========================================================================
-    // LAPTOP MODE: Physical Keyboard Passthrough
+    // LAPTOP MODE: Physical Keyboard Passthrough (With Full Modifier Support)
     // ==========================================================================
     const kbdCaptureZone = document.getElementById('kbdCaptureZone');
     const kbdStatusText = document.getElementById('kbdStatusText');
@@ -675,9 +659,9 @@
       kbdCaptureZone.classList.remove('capturing');
       kbdStatusText.textContent = "Click box to enable";
       kbdStatusText.style.color = "var(--text-muted)";
+      send('R:ALL');
     });
 
-    // Mapping browser key codes to Pico Keycodes
     const KEY_NAME_MAP = {
       'Control': 'CTRL',
       'Alt': 'ALT',
@@ -699,8 +683,11 @@
       const mapped = KEY_NAME_MAP[e.key];
       if (mapped) {
         send(`K:D:${mapped}`);
+      } else if (e.ctrlKey || e.altKey) {
+        // Modifier combination (e.g. Ctrl+C, Ctrl+Z, Ctrl+D)
+        send(`K:D:${e.key.toUpperCase()}`);
       } else if (e.key.length === 1) {
-        // Single character typed directly
+        // Plain typed character
         send(`T:${e.key}`);
       }
     });
@@ -710,6 +697,8 @@
       const mapped = KEY_NAME_MAP[e.key];
       if (mapped) {
         send(`K:U:${mapped}`);
+      } else if (e.ctrlKey || e.altKey) {
+        send(`K:U:${e.key.toUpperCase()}`);
       }
     });
 
@@ -727,6 +716,7 @@
         mouseZone.classList.add('locked');
       } else {
         mouseZone.classList.remove('locked');
+        send('M:0:0:0:0');
       }
     });
 
@@ -761,7 +751,7 @@
     });
 
     // ==========================================================================
-    // MOBILE MODE: Touchpad & Gestures
+    // MOBILE MODE: Touchpad
     // ==========================================================================
     const mobileTrackpad = document.getElementById('mobileTrackpad');
     let lastX = 0, lastY = 0;
@@ -794,14 +784,12 @@
     });
 
     mobileTrackpad.addEventListener('touchend', () => {
-      // Tap under 250ms = Left click
       if (!touchMoved && (Date.now() - touchStartTime) < 250) {
         send(`M:1:0:0:0`);
         setTimeout(() => send(`M:0:0:0:0`), 40);
       }
     });
 
-    // Mobile Scrollbar
     const mobileScrollbar = document.getElementById('mobileScrollbar');
     let lastScrollY = 0;
 
@@ -819,7 +807,6 @@
       }
     });
 
-    // Mobile Clicks
     const leftBtn = document.getElementById('mobileLeftClick');
     const rightBtn = document.getElementById('mobileRightClick');
 
@@ -828,9 +815,7 @@
     rightBtn.addEventListener('pointerdown', () => send('M:2:0:0:0'));
     rightBtn.addEventListener('pointerup', () => send('M:0:0:0:0'));
 
-    // ==========================================================================
-    // Command Bars (Laptop & Mobile)
-    // ==========================================================================
+    // Command Bars
     function setupCmdInput(inputEl, sendBtn, enterBtn) {
       sendBtn.addEventListener('click', () => {
         const text = inputEl.value;
@@ -846,7 +831,8 @@
         if (e.key === 'Enter') {
           const text = inputEl.value;
           if (text) {
-            send(`T:${text}\n`);
+            send(`T:${text}`);
+            send('K:P:ENTER');
             inputEl.value = '';
           } else {
             send('K:P:ENTER');
@@ -867,9 +853,6 @@
       document.getElementById('mobileEnterBtn')
     );
 
-    // ==========================================================================
-    // Macros & Modifiers
-    // ==========================================================================
     function executeMacro(name) {
       if (name === 'ctrl-c') {
         send('K:D:CTRL'); send('K:P:C'); send('K:U:CTRL');
@@ -898,7 +881,6 @@
       btn.addEventListener('click', () => executeMacro(btn.dataset.macro));
     });
 
-    // Mobile Virtual Modifiers
     const modifiers = { ctrl: false, alt: false, shift: false, gui: false };
     document.querySelectorAll('[data-mod]').forEach(btn => {
       btn.addEventListener('click', () => {

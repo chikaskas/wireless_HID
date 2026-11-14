@@ -1,16 +1,5 @@
 # ==============================================================================
-# Hack Club Orpheus Pico (RP2040) - CircuitPython UART to USB HID
-# ==============================================================================
-# Description:
-#   Listens on UART (GP1 RX) for commands forwarded by the ESP32-C3 Super Mini.
-#   Translates packets into native USB Keyboard & Mouse HID events sent to Pi 5.
-#
-# Hardware Connections:
-#   RP2040 GP1 (RX)    <- ESP32-C3 GPIO4 (TX)
-#   RP2040 GP0 (TX)    -> ESP32-C3 GPIO5 (RX) [Optional]
-#   RP2040 GND         -- ESP32-C3 GND
-#   RP2040 VBUS (5V)   -- ESP32-C3 5V/VCC
-#   RP2040 USB Type-C  -> Raspberry Pi 5 USB Port
+# Hack Club Orpheus Pico (RP2040) - CircuitPython UART to USB HID (Hardened)
 # ==============================================================================
 
 import time
@@ -24,18 +13,21 @@ from adafruit_hid.keycode import Keycode
 from adafruit_hid.mouse import Mouse
 
 # Initialize USB HID devices
-time.sleep(1) # Allow USB enumeration
-kbd = Keyboard(usb_hid.devices)
-layout = KeyboardLayoutUS(kbd)
-mouse = Mouse(usb_hid.devices)
+time.sleep(1) # USB enumeration delay
+try:
+    kbd = Keyboard(usb_hid.devices)
+    layout = KeyboardLayoutUS(kbd)
+    mouse = Mouse(usb_hid.devices)
+except Exception as e:
+    print("HID init error:", e)
 
-# Initialize UART
-# GP0 = TX, GP1 = RX
+# Hardware UART on RP2040: GP0 = TX, GP1 = RX
 uart = busio.UART(board.GP0, board.GP1, baudrate=115200, timeout=0.01)
 
 # Keycode lookup dictionary
 KEY_MAP = {
     "CTRL": Keycode.CONTROL,
+    "CONTROL": Keycode.CONTROL,
     "ALT": Keycode.ALT,
     "SHIFT": Keycode.SHIFT,
     "GUI": Keycode.GUI,
@@ -53,17 +45,21 @@ KEY_MAP = {
     "RIGHT": Keycode.RIGHT_ARROW,
 }
 
-# Add A-Z and 0-9 to Keycode lookup
+# Dynamically populate A-Z and 0-9
 for char in "ABCDEFGHIJKLMNOPQRSTUVWXYZ":
     if hasattr(Keycode, char):
         KEY_MAP[char] = getattr(Keycode, char)
 for digit in "0123456789":
-    name = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"][int(digit)]
+    names = ["ZERO", "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE"]
+    name = names[int(digit)]
     if hasattr(Keycode, name):
         KEY_MAP[digit] = getattr(Keycode, name)
 
-# Track active mouse button state
 current_mouse_buttons = 0
+
+def clamp(val, min_v=-127, max_v=127):
+    """Clamps integer to fit inside signed 8-bit HID descriptor limits."""
+    return max(min_v, min(max_v, val))
 
 def handle_mouse_packet(packet):
     """Parses M:<buttons>:<dx>:<dy>:<wheel>"""
@@ -73,29 +69,28 @@ def handle_mouse_packet(packet):
         if len(parts) < 5:
             return
         btn_mask = int(parts[1])
-        dx = int(parts[2])
-        dy = int(parts[3])
-        wheel = int(parts[4])
+        # Crucial: Clamp to -127..127 to prevent struct.pack OverflowError
+        dx = clamp(int(parts[2]))
+        dy = clamp(int(parts[3]))
+        wheel = clamp(int(parts[4]))
 
-        # Mouse relative movement & scroll
         if dx != 0 or dy != 0 or wheel != 0:
             mouse.move(x=dx, y=dy, wheel=wheel)
 
-        # Handle button presses/releases
         if btn_mask != current_mouse_buttons:
-            # Left button (Bit 0)
+            # Left (Bit 0)
             if (btn_mask & 1) and not (current_mouse_buttons & 1):
                 mouse.press(Mouse.LEFT_BUTTON)
             elif not (btn_mask & 1) and (current_mouse_buttons & 1):
                 mouse.release(Mouse.LEFT_BUTTON)
 
-            # Right button (Bit 1)
+            # Right (Bit 1)
             if (btn_mask & 2) and not (current_mouse_buttons & 2):
                 mouse.press(Mouse.RIGHT_BUTTON)
             elif not (btn_mask & 2) and (current_mouse_buttons & 2):
                 mouse.release(Mouse.RIGHT_BUTTON)
 
-            # Middle button (Bit 2)
+            # Middle (Bit 2)
             if (btn_mask & 4) and not (current_mouse_buttons & 4):
                 mouse.press(Mouse.MIDDLE_BUTTON)
             elif not (btn_mask & 4) and (current_mouse_buttons & 4):
@@ -115,10 +110,8 @@ def handle_key_packet(packet):
         key_name = parts[2].strip().upper()
 
         code = KEY_MAP.get(key_name)
-        if code is None:
-            # Fallback if Keycode has the attribute directly
-            if hasattr(Keycode, key_name):
-                code = getattr(Keycode, key_name)
+        if code is None and hasattr(Keycode, key_name):
+            code = getattr(Keycode, key_name)
 
         if code is not None:
             if action == "D":
@@ -131,16 +124,25 @@ def handle_key_packet(packet):
         print("Key parse error:", e)
 
 def handle_text_packet(packet):
-    """Parses T:<string> and types it out verbatim"""
+    """Parses T:<string> and types characters verbatim."""
     try:
         text = packet[2:] # Strip 'T:'
         layout.write(text)
     except Exception as e:
         print("Text parse error:", e)
 
-print("[Orpheus-HID] Ready. Listening on UART (GP1 RX)...")
+def reset_all_inputs():
+    """Failsafe release of all held keys and mouse buttons."""
+    global current_mouse_buttons
+    try:
+        kbd.release_all()
+        mouse.release_all()
+        current_mouse_buttons = 0
+    except:
+        pass
 
-# Main loop: process incoming UART stream
+print("[Orpheus-HID] Ready. Listening on UART GP1 (RX)...")
+
 rx_buffer = bytearray()
 
 while True:
@@ -150,7 +152,7 @@ while True:
         while b"\n" in rx_buffer:
             line, rx_buffer = rx_buffer.split(b"\n", 1)
             try:
-                line_str = line.decode("utf-8").strip()
+                line_str = line.decode("utf-8").strip("\r\n")
                 if not line_str:
                     continue
 
@@ -160,5 +162,7 @@ while True:
                     handle_key_packet(line_str)
                 elif line_str.startswith("T:"):
                     handle_text_packet(line_str)
+                elif line_str.startswith("R:ALL"):
+                    reset_all_inputs()
             except Exception as e:
-                print("Buffer decoding error:", e)
+                print("Decode error:", e)
