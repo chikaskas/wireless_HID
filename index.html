@@ -1,101 +1,917 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pi 5 Wireless KVM Bridge</title>
-    <style>
-        body { font-family: sans-serif, system-ui; text-align: center; margin-top: 50px; background: #121212; color: #e0e0e0; }
-        button { padding: 12px 24px; font-size: 16px; background: #4CAF50; color: white; border: none; border-radius: 6px; cursor: pointer; }
-        button:hover { background: #45a049; }
-        #status { margin: 20px 0; font-weight: bold; color: #ffa726; }
-        textarea { width: 80%; max-width: 500px; height: 120px; font-size: 16px; padding: 10px; margin-top: 15px; background: #1e1e1e; color: #fff; border: 1px solid #444; border-radius: 6px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pi 5 BLE HID Control Center</title>
+  <style>
+    :root {
+      --bg: #0c0e17;
+      --surface: #141824;
+      --surface-border: #23293d;
+      --surface-hover: #1b2133;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --text: #f3f4f6;
+      --text-muted: #8b95a5;
+      --purple: #8b5cf6;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--surface-border);
+      padding: 8px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--danger);
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+
+    .status-dot.connected {
+      background: var(--success);
+      box-shadow: 0 0 10px var(--success);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* Mode Switcher Tabs */
+    .mode-switch {
+      display: flex;
+      background: var(--bg);
+      border: 1px solid var(--surface-border);
+      border-radius: 8px;
+      padding: 2px;
+    }
+
+    .mode-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: color 0.15s, background 0.15s;
+    }
+
+    .mode-tab.active {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--surface-border);
+    }
+
+    button.btn-primary {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 7px 14px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 13px;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+
+    button.btn-primary:hover {
+      background: var(--accent-hover);
+    }
+
+    /* Main Content Area */
+    main {
+      flex: 1;
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ==========================================================================
+       LAPTOP MODE (Side-by-side desktop view + real keyboard/mouse passthrough)
+       ========================================================================== */
+    #laptopView {
+      display: none;
+      width: 100%;
+      height: 100%;
+      padding: 16px;
+      gap: 16px;
+    }
+
+    body.laptop-mode #laptopView {
+      display: flex;
+    }
+
+    .laptop-col {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .laptop-left {
+      flex: 1.2;
+    }
+
+    .laptop-right {
+      flex: 1;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 10px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* Keyboard Passthrough Zone */
+    #kbdCaptureZone {
+      background: var(--bg);
+      border: 2px dashed var(--surface-border);
+      border-radius: 8px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      outline: none;
+    }
+
+    #kbdCaptureZone:focus, #kbdCaptureZone.capturing {
+      border-color: var(--success);
+      background: rgba(16, 185, 129, 0.05);
+    }
+
+    #kbdCaptureZone .indicator {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    #kbdCaptureZone .subtext {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-align: center;
+    }
+
+    /* Pointer Lock Mouse Capture Zone */
+    #mouseCaptureZone {
+      flex: 1;
+      background: var(--bg);
+      border: 2px dashed var(--surface-border);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    #mouseCaptureZone.locked {
+      border-color: var(--purple);
+      background: rgba(139, 92, 246, 0.05);
+    }
+
+    /* Laptop Command Bar */
+    .command-bar {
+      display: flex;
+      gap: 8px;
+    }
+
+    .terminal-input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--surface-border);
+      color: #38bdf8;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      user-select: text;
+      -webkit-user-select: text;
+    }
+
+    .terminal-input:focus {
+      border-color: var(--accent);
+    }
+
+    /* Macro Grid */
+    .macro-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 8px;
+    }
+
+    .macro-btn {
+      background: var(--surface-hover);
+      border: 1px solid var(--surface-border);
+      color: var(--text);
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+      text-align: center;
+    }
+
+    .macro-btn:hover {
+      background: var(--surface-border);
+      border-color: var(--accent);
+    }
+
+    /* ==========================================================================
+       MOBILE MODE (Handheld touch controller, thumb-friendly virtual keys)
+       ========================================================================== */
+    #mobileView {
+      display: none;
+      width: 100%;
+      height: 100%;
+      flex-direction: column;
+      padding: 10px;
+      gap: 10px;
+    }
+
+    body.mobile-mode #mobileView {
+      display: flex;
+    }
+
+    .mobile-touch-row {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+      min-height: 160px;
+    }
+
+    #mobileTrackpad {
+      flex: 1;
+      background: var(--surface);
+      border: 1px dashed var(--surface-border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 14px;
+      touch-action: none;
+    }
+
+    #mobileScrollbar {
+      width: 44px;
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--text-muted);
+      font-size: 12px;
+      writing-mode: vertical-rl;
+      touch-action: none;
+    }
+
+    .mobile-mouse-clicks {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      height: 48px;
+    }
+
+    .btn-mouse {
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      color: var(--text);
+      font-weight: 600;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-mouse:active, .btn-mouse.active {
+      background: var(--surface-border);
+    }
+
+    .keypad {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .key-row {
+      display: flex;
+      gap: 5px;
+    }
+
+    .vkey {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--surface-border);
+      color: var(--text);
+      padding: 10px 4px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+    }
+
+    .vkey.active {
+      background: var(--success);
+      color: #000;
+      border-color: var(--success);
+    }
+
+    .vkey.special {
+      background: #1e2438;
+    }
+
+    .vkey.kali {
+      background: #2b1836;
+      border-color: #55276c;
+      color: #e9d5ff;
+    }
+  </style>
 </head>
-<body>
+<body class="mobile-mode">
 
-    <h2>Raspberry Pi 5 Wireless KVM</h2>
-    <div id="status">Status: Disconnected</div>
-    <button id="connectBtn">Connect to ESP32-C3</button>
-    
-    <br><br>
-    <p>Type below to send keystrokes directly to the Pi 5:</p>
-    <textarea id="inputBox" placeholder="Click here and type your commands..." disabled></textarea>
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="status-badge">
+        <div id="statusDot" class="status-dot"></div>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </div>
 
-    <script>
-        const UART_SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-        const UART_RX_CHAR_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+    <!-- Mode Selector: Laptop vs Mobile -->
+    <div class="mode-switch">
+      <button class="mode-tab active" id="tabMobile">📱 Mobile</button>
+      <button class="mode-tab" id="tabLaptop">💻 Laptop</button>
+    </div>
 
-        let bluetoothDevice;
-        let rxCharacteristic;
-        let isSending = false;
+    <div class="header-actions">
+      <button class="btn-primary" id="connectBtn">Connect BLE</button>
+    </div>
+  </header>
 
-        const connectBtn = document.getElementById('connectBtn');
-        const statusDiv = document.getElementById('status');
-        const inputBox = document.getElementById('inputBox');
+  <main>
+    <!-- ====================================================================
+         1. LAPTOP FIRST VIEW
+         Designed for when you're on a Laptop/Desktop controlling the Pi
+         Features: Physical Keyboard Capture, Pointer Lock Mouse, Macros
+         ==================================================================== -->
+    <div id="laptopView">
+      <!-- Left Column: Keyboard & Terminal commands -->
+      <div class="laptop-col laptop-left">
+        <!-- Physical Keyboard Passthrough Zone -->
+        <div class="panel">
+          <div class="panel-title">
+            <span>Physical Keyboard Passthrough</span>
+            <span id="kbdStatusText" style="color:var(--text-muted); font-size:11px;">Click box to enable</span>
+          </div>
+          <div id="kbdCaptureZone" tabindex="0">
+            <span class="indicator">⌨️ Click here to type with your Laptop's Real Keyboard</span>
+            <span class="subtext">
+              Directly passes keystrokes, shortcuts (Ctrl+C, Ctrl+Alt+T, Tab, Nano/Vim commands) to the Pi 5.
+            </span>
+          </div>
+        </div>
 
-        connectBtn.addEventListener('click', async () => {
-            try {
-                statusDiv.innerText = "Status: Connecting...";
-                bluetoothDevice = await navigator.bluetooth.requestDevice({
-                    filters: [{ name: 'Pi_KVM_Bridge' }],
-                    optionalServices: [UART_SERVICE_UUID]
-                });
+        <!-- Terminal Quick Sender -->
+        <div class="panel">
+          <div class="panel-title">Quick Command Line</div>
+          <div class="command-bar">
+            <input type="text" id="laptopCmdInput" class="terminal-input" placeholder="Type command to send (e.g., kali, sudo apt update)...">
+            <button class="btn-primary" id="laptopSendBtn">Send</button>
+            <button class="btn-primary" id="laptopEnterBtn" style="background:var(--success);">↵ Enter</button>
+          </div>
+        </div>
 
-                const server = await bluetoothDevice.gatt.connect();
-                const service = await server.getPrimaryService(UART_SERVICE_UUID);
-                rxCharacteristic = await service.getCharacteristic(UART_RX_CHAR_UUID);
+        <!-- Kali Linux Shortcut Hub -->
+        <div class="panel" style="flex:1;">
+          <div class="panel-title">Kali & Terminal Macros</div>
+          <div class="macro-grid">
+            <button class="macro-btn" data-macro="ctrl-c">Ctrl + C</button>
+            <button class="macro-btn" data-macro="ctrl-alt-t">Ctrl + Alt + T</button>
+            <button class="macro-btn" data-macro="ctrl-z">Ctrl + Z</button>
+            <button class="macro-btn" data-macro="ctrl-d">Ctrl + D</button>
+            <button class="macro-btn" data-macro="ctrl-l">Ctrl + L (Clear)</button>
+            <button class="macro-btn" data-macro="esc">Esc</button>
+            <button class="macro-btn" data-macro="tab">Tab (Auto)</button>
+            <button class="macro-btn" data-macro="up">↑ (Prev Cmd)</button>
+            <button class="macro-btn" data-macro="down">↓ (Next Cmd)</button>
+            <button class="macro-btn" data-macro="enter">↵ Enter</button>
+          </div>
+        </div>
+      </div>
 
-                statusDiv.innerText = "Status: Connected & Ready!";
-                statusDiv.style.color = "#66bb6a";
-                connectBtn.style.display = "none";
-                inputBox.disabled = false;
-                inputBox.focus();
-            } catch (error) {
-                console.error(error);
-                statusDiv.innerText = "Status: Connection Failed / Cancelled";
-                statusDiv.style.color = "#ef5350";
-            }
+      <!-- Right Column: Pointer-Lock Desktop Mouse Capture -->
+      <div class="laptop-col laptop-right">
+        <div class="panel" style="height:100%;">
+          <div class="panel-title">
+            <span>Hardware Mouse Capture</span>
+            <span style="font-size:11px; color:var(--text-muted)">Press ESC to exit lock</span>
+          </div>
+          <div id="mouseCaptureZone">
+            <span style="font-size:28px;">🖱️</span>
+            <span style="font-size:15px; font-weight:600;">Click to Capture Mouse Cursor</span>
+            <span style="font-size:12px; color:var(--text-muted); text-align:center; max-width:280px;">
+              Locks your mouse pointer to control the Pi 5 screen directly at true full speed. Left/Right clicks and scroll wheels pass through.
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ====================================================================
+         2. MOBILE FIRST VIEW
+         Designed for phones: Large touch trackpad, virtual buttons & thumb nav
+         ==================================================================== -->
+    <div id="mobileView">
+      <!-- Touchpad & Scrollbar -->
+      <div class="mobile-touch-row">
+        <div id="mobileTrackpad">
+          <span>Touchpad (Drag, Tap=Click)</span>
+        </div>
+        <div id="mobileScrollbar">Scroll</div>
+      </div>
+
+      <!-- Left & Right Click Bars -->
+      <div class="mobile-mouse-clicks">
+        <button class="btn-mouse" id="mobileLeftClick">Left Click</button>
+        <button class="btn-mouse" id="mobileRightClick">Right Click</button>
+      </div>
+
+      <!-- Quick Command Input -->
+      <div class="command-bar">
+        <input type="text" id="mobileCmdInput" class="terminal-input" placeholder="Quick command (e.g., kali)...">
+        <button class="btn-primary" id="mobileSendBtn">Send</button>
+        <button class="btn-primary" id="mobileEnterBtn" style="background:var(--success);">↵</button>
+      </div>
+
+      <!-- Virtual Keyboard Grid -->
+      <div class="keypad">
+        <div class="key-row">
+          <button class="vkey kali" data-macro="ctrl-c">Ctrl+C</button>
+          <button class="vkey kali" data-macro="ctrl-alt-t">Terminal</button>
+          <button class="vkey kali" data-macro="ctrl-z">Ctrl+Z</button>
+          <button class="vkey kali" data-macro="ctrl-l">Clear</button>
+          <button class="vkey kali" data-macro="ctrl-d">EOF</button>
+        </div>
+
+        <div class="key-row">
+          <button class="vkey special" id="mobModCtrl" data-mod="ctrl">Ctrl</button>
+          <button class="vkey special" id="mobModAlt" data-mod="alt">Alt</button>
+          <button class="vkey special" id="mobModShift" data-mod="shift">Shift</button>
+          <button class="vkey special" id="mobModGui" data-mod="gui">Super</button>
+          <button class="vkey special" data-action="tab">Tab</button>
+          <button class="vkey special" data-action="esc">Esc</button>
+          <button class="vkey special" data-action="backspace">⌫</button>
+        </div>
+
+        <div class="key-row">
+          <button class="vkey special" data-action="up">↑</button>
+          <button class="vkey special" data-action="down">↓</button>
+          <button class="vkey special" data-action="left">←</button>
+          <button class="vkey special" data-action="right">→</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // ==========================================================================
+    // Web BLE Communication Engine
+    // ==========================================================================
+    const NUS_SERVICE_UUID = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+    const NUS_RX_CHAR_UUID = '6e400002-b5a3-f393-e0a9-e50e24dcca9e'; // Write
+
+    let bleDevice = null;
+    let rxChar = null;
+    let isConnected = false;
+
+    const connectBtn = document.getElementById('connectBtn');
+    const statusDot = document.getElementById('statusDot');
+    const statusText = document.getElementById('statusText');
+
+    connectBtn.addEventListener('click', async () => {
+      if (isConnected) {
+        if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
+        onDisconnected();
+        return;
+      }
+      try {
+        statusText.textContent = "Scanning...";
+        bleDevice = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: 'Pi5' }, { services: [NUS_SERVICE_UUID] }],
+          optionalServices: [NUS_SERVICE_UUID]
         });
 
-        async function sendToBridge(stringData) {
-            if (!rxCharacteristic || isSending) return;
-            isSending = true;
-            try {
-                const encoder = new TextEncoder();
-                // Using writeValue (with response) guarantees delivery tracking across platforms
-                await rxCharacteristic.writeValue(encoder.encode(stringData));
-            } catch (err) {
-                console.error("BLE Send Error:", err);
-            } finally {
-                isSending = false;
-            }
+        bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+        statusText.textContent = "Connecting...";
+        const server = await bleDevice.gatt.connect();
+        const service = await server.getPrimaryService(NUS_SERVICE_UUID);
+        rxChar = await service.getCharacteristic(NUS_RX_CHAR_UUID);
+
+        isConnected = true;
+        statusDot.classList.add('connected');
+        statusText.textContent = "Connected";
+        connectBtn.textContent = "Disconnect";
+      } catch (err) {
+        console.error("BLE Connect failed:", err);
+        statusText.textContent = "Failed/Cancelled";
+      }
+    });
+
+    function onDisconnected() {
+      isConnected = false;
+      rxChar = null;
+      statusDot.classList.remove('connected');
+      statusText.textContent = "Disconnected";
+      connectBtn.textContent = "Connect BLE";
+    }
+
+    // Packet queue for smooth non-blocking BLE transmissions
+    let sendQueue = [];
+    let isSending = false;
+
+    function send(cmd) {
+      if (!isConnected || !rxChar) return;
+      sendQueue.push(cmd.endsWith('\n') ? cmd : cmd + '\n');
+      processSendQueue();
+    }
+
+    async function processSendQueue() {
+      if (isSending || sendQueue.length === 0) return;
+      isSending = true;
+      const cmd = sendQueue.shift();
+      try {
+        const enc = new TextEncoder();
+        await rxChar.writeValueWithoutResponse(enc.encode(cmd));
+      } catch (e) {
+        console.warn("BLE Write error:", e);
+      } finally {
+        isSending = false;
+        if (sendQueue.length > 0) processSendQueue();
+      }
+    }
+
+    // ==========================================================================
+    // View Switcher (Auto-detect + Manual Tabs)
+    // ==========================================================================
+    const tabMobile = document.getElementById('tabMobile');
+    const tabLaptop = document.getElementById('tabLaptop');
+
+    function setView(mode) {
+      if (mode === 'laptop') {
+        document.body.classList.remove('mobile-mode');
+        document.body.classList.add('laptop-mode');
+        tabLaptop.classList.add('active');
+        tabMobile.classList.remove('active');
+      } else {
+        document.body.classList.remove('laptop-mode');
+        document.body.classList.add('mobile-mode');
+        tabMobile.classList.add('active');
+        tabLaptop.classList.remove('active');
+      }
+    }
+
+    tabMobile.addEventListener('click', () => setView('mobile'));
+    tabLaptop.addEventListener('click', () => setView('laptop'));
+
+    // Auto-detect screen size on load
+    if (window.innerWidth >= 768) {
+      setView('laptop');
+    } else {
+      setView('mobile');
+    }
+
+    // ==========================================================================
+    // LAPTOP MODE: Physical Keyboard Passthrough
+    // ==========================================================================
+    const kbdCaptureZone = document.getElementById('kbdCaptureZone');
+    const kbdStatusText = document.getElementById('kbdStatusText');
+
+    kbdCaptureZone.addEventListener('focus', () => {
+      kbdCaptureZone.classList.add('capturing');
+      kbdStatusText.textContent = "Active - Keys will send to Pi";
+      kbdStatusText.style.color = "var(--success)";
+    });
+
+    kbdCaptureZone.addEventListener('blur', () => {
+      kbdCaptureZone.classList.remove('capturing');
+      kbdStatusText.textContent = "Click box to enable";
+      kbdStatusText.style.color = "var(--text-muted)";
+    });
+
+    // Mapping browser key codes to Pico Keycodes
+    const KEY_NAME_MAP = {
+      'Control': 'CTRL',
+      'Alt': 'ALT',
+      'Shift': 'SHIFT',
+      'Meta': 'GUI',
+      'Enter': 'ENTER',
+      'Tab': 'TAB',
+      'Escape': 'ESC',
+      'Backspace': 'BACKSPACE',
+      ' ': 'SPACE',
+      'ArrowUp': 'UP',
+      'ArrowDown': 'DOWN',
+      'ArrowLeft': 'LEFT',
+      'ArrowRight': 'RIGHT'
+    };
+
+    kbdCaptureZone.addEventListener('keydown', (e) => {
+      e.preventDefault();
+      const mapped = KEY_NAME_MAP[e.key];
+      if (mapped) {
+        send(`K:D:${mapped}`);
+      } else if (e.key.length === 1) {
+        // Single character typed directly
+        send(`T:${e.key}`);
+      }
+    });
+
+    kbdCaptureZone.addEventListener('keyup', (e) => {
+      e.preventDefault();
+      const mapped = KEY_NAME_MAP[e.key];
+      if (mapped) {
+        send(`K:U:${mapped}`);
+      }
+    });
+
+    // ==========================================================================
+    // LAPTOP MODE: Pointer Lock Mouse Capture
+    // ==========================================================================
+    const mouseZone = document.getElementById('mouseCaptureZone');
+
+    mouseZone.addEventListener('click', () => {
+      mouseZone.requestPointerLock();
+    });
+
+    document.addEventListener('pointerlockchange', () => {
+      if (document.pointerLockElement === mouseZone) {
+        mouseZone.classList.add('locked');
+      } else {
+        mouseZone.classList.remove('locked');
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement === mouseZone) {
+        const dx = e.movementX;
+        const dy = e.movementY;
+        if (dx !== 0 || dy !== 0) {
+          send(`M:0:${dx}:${dy}:0`);
         }
+      }
+    });
 
-        inputBox.addEventListener('input', async (event) => {
-            const textToSend = event.target.value;
-            const lastChar = textToSend.slice(-1);
-            
-            if (textToSend.length > 50) {
-                inputBox.value = lastChar;
-            }
-            await sendToBridge(lastChar);
-        });
+    document.addEventListener('mousedown', (e) => {
+      if (document.pointerLockElement === mouseZone) {
+        const btn = e.button === 0 ? 1 : (e.button === 2 ? 2 : 4);
+        send(`M:${btn}:0:0:0`);
+      }
+    });
 
-        inputBox.addEventListener('keydown', async (event) => {
-            let sendVal = "";
-            if (event.key === "Enter") {
-                sendVal = "\n";
-            } else if (event.key === "Backspace") {
-                sendVal = "\b";
-            }
+    document.addEventListener('mouseup', (e) => {
+      if (document.pointerLockElement === mouseZone) {
+        send(`M:0:0:0:0`);
+      }
+    });
 
-            if (sendVal) {
-                event.preventDefault();
-                await sendToBridge(sendVal);
-            }
-        });
-    </script>
+    document.addEventListener('wheel', (e) => {
+      if (document.pointerLockElement === mouseZone) {
+        const step = e.deltaY < 0 ? 1 : -1;
+        send(`M:0:0:0:${step}`);
+      }
+    });
 
+    // ==========================================================================
+    // MOBILE MODE: Touchpad & Gestures
+    // ==========================================================================
+    const mobileTrackpad = document.getElementById('mobileTrackpad');
+    let lastX = 0, lastY = 0;
+    let touchStartTime = 0;
+    let touchMoved = false;
+
+    mobileTrackpad.addEventListener('touchstart', (e) => {
+      if (e.touches.length === 1) {
+        lastX = e.touches[0].clientX;
+        lastY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+        touchMoved = false;
+      }
+    });
+
+    mobileTrackpad.addEventListener('touchmove', (e) => {
+      if (e.touches.length === 1) {
+        const curX = e.touches[0].clientX;
+        const curY = e.touches[0].clientY;
+        const dx = Math.round((curX - lastX) * 1.5);
+        const dy = Math.round((curY - lastY) * 1.5);
+        lastX = curX;
+        lastY = curY;
+
+        if (Math.abs(dx) > 0 || Math.abs(dy) > 0) {
+          touchMoved = true;
+          send(`M:0:${dx}:${dy}:0`);
+        }
+      }
+    });
+
+    mobileTrackpad.addEventListener('touchend', () => {
+      // Tap under 250ms = Left click
+      if (!touchMoved && (Date.now() - touchStartTime) < 250) {
+        send(`M:1:0:0:0`);
+        setTimeout(() => send(`M:0:0:0:0`), 40);
+      }
+    });
+
+    // Mobile Scrollbar
+    const mobileScrollbar = document.getElementById('mobileScrollbar');
+    let lastScrollY = 0;
+
+    mobileScrollbar.addEventListener('touchstart', (e) => {
+      lastScrollY = e.touches[0].clientY;
+    });
+
+    mobileScrollbar.addEventListener('touchmove', (e) => {
+      const curY = e.touches[0].clientY;
+      const dy = lastScrollY - curY;
+      if (Math.abs(dy) > 8) {
+        const step = dy > 0 ? 1 : -1;
+        send(`M:0:0:0:${step}`);
+        lastScrollY = curY;
+      }
+    });
+
+    // Mobile Clicks
+    const leftBtn = document.getElementById('mobileLeftClick');
+    const rightBtn = document.getElementById('mobileRightClick');
+
+    leftBtn.addEventListener('pointerdown', () => send('M:1:0:0:0'));
+    leftBtn.addEventListener('pointerup', () => send('M:0:0:0:0'));
+    rightBtn.addEventListener('pointerdown', () => send('M:2:0:0:0'));
+    rightBtn.addEventListener('pointerup', () => send('M:0:0:0:0'));
+
+    // ==========================================================================
+    // Command Bars (Laptop & Mobile)
+    // ==========================================================================
+    function setupCmdInput(inputEl, sendBtn, enterBtn) {
+      sendBtn.addEventListener('click', () => {
+        const text = inputEl.value;
+        if (text) {
+          send(`T:${text}`);
+          inputEl.value = '';
+        }
+      });
+      enterBtn.addEventListener('click', () => {
+        send('K:P:ENTER');
+      });
+      inputEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const text = inputEl.value;
+          if (text) {
+            send(`T:${text}\n`);
+            inputEl.value = '';
+          } else {
+            send('K:P:ENTER');
+          }
+        }
+      });
+    }
+
+    setupCmdInput(
+      document.getElementById('laptopCmdInput'),
+      document.getElementById('laptopSendBtn'),
+      document.getElementById('laptopEnterBtn')
+    );
+
+    setupCmdInput(
+      document.getElementById('mobileCmdInput'),
+      document.getElementById('mobileSendBtn'),
+      document.getElementById('mobileEnterBtn')
+    );
+
+    // ==========================================================================
+    // Macros & Modifiers
+    // ==========================================================================
+    function executeMacro(name) {
+      if (name === 'ctrl-c') {
+        send('K:D:CTRL'); send('K:P:C'); send('K:U:CTRL');
+      } else if (name === 'ctrl-alt-t') {
+        send('K:D:CTRL'); send('K:D:ALT'); send('K:P:T'); send('K:U:ALT'); send('K:U:CTRL');
+      } else if (name === 'ctrl-z') {
+        send('K:D:CTRL'); send('K:P:Z'); send('K:U:CTRL');
+      } else if (name === 'ctrl-d') {
+        send('K:D:CTRL'); send('K:P:D'); send('K:U:CTRL');
+      } else if (name === 'ctrl-l') {
+        send('K:D:CTRL'); send('K:P:L'); send('K:U:CTRL');
+      } else if (name === 'esc') {
+        send('K:P:ESC');
+      } else if (name === 'tab') {
+        send('K:P:TAB');
+      } else if (name === 'up') {
+        send('K:P:UP');
+      } else if (name === 'down') {
+        send('K:P:DOWN');
+      } else if (name === 'enter') {
+        send('K:P:ENTER');
+      }
+    }
+
+    document.querySelectorAll('[data-macro]').forEach(btn => {
+      btn.addEventListener('click', () => executeMacro(btn.dataset.macro));
+    });
+
+    // Mobile Virtual Modifiers
+    const modifiers = { ctrl: false, alt: false, shift: false, gui: false };
+    document.querySelectorAll('[data-mod]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mod = btn.dataset.mod;
+        modifiers[mod] = !modifiers[mod];
+        btn.classList.toggle('active', modifiers[mod]);
+        send(`K:${modifiers[mod] ? 'D' : 'U'}:${mod.toUpperCase()}`);
+      });
+    });
+
+    document.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        send(`K:P:${btn.dataset.action.toUpperCase()}`);
+      });
+    });
+  </script>
 </body>
 </html>
